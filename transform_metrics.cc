@@ -11,7 +11,7 @@ using json = nlohmann::json;
  *
  * The full stats JSON object contains structures that conveniently map onto
  * the metric keys. For instance, using the example above
- * (worker.0.core.1.requests), we find in the full stats object:
+ * (worker.0.core.0.requests), we find in the full stats object:
  *
  *     {
  *         "workers": [{
@@ -71,14 +71,12 @@ static std::string metrics_key_to_json_pointer_path(std::string key) {
     return path;
 }
 
-json transform_metrics(json doc) {
+void transform_metrics(json doc) {
     auto metrics = doc["metrics"];
 
     if (metrics.is_null()) {
-        return doc;
+        return;
     }
-
-    json patches;
 
     for (json::iterator it = metrics.begin(); it != metrics.end(); ++it) {
         std::string path = metrics_key_to_json_pointer_path(it.key());
@@ -87,31 +85,13 @@ json transform_metrics(json doc) {
             continue;
         }
 
-        json patch = {
-            {"path", path},
-            {"value", value}
-        };
-
-        bool path_already_exists;
-
         try {
-            path_already_exists = doc[json::json_pointer(path)].is_null();
-        } catch (json::exception &e) {
-            uwsgi_log("[stats-pusher-mongodb] WARNING: cannot convert metric"
-                      " key %s to pointer: %s\n", it.key().c_str(), e.what());
-            continue;
+            doc[json::json_pointer(path)] = value;
+        } catch (json::exception &exc) {
+            uwsgi_log("[stats-pusher-mongodb] error setting json val for "
+                      "metric %s: %s\n", it.key().c_str(), exc.what());
         }
-
-        patch["op"] = (path_already_exists) ? "add" : "replace";
-        patches.push_back(patch);
     }
 
     doc.erase("metrics");
-
-    try {
-        return doc.patch(patches);
-    } catch (json::exception &e) {
-        uwsgi_log("[stats-pusher-mongodb] WARNING: %s\n", e.what());
-        return doc;
-    }
 }

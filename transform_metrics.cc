@@ -71,7 +71,7 @@ static std::string metrics_key_to_json_pointer_path(std::string key) {
     return path;
 }
 
-void transform_metrics(json doc) {
+void transform_metrics(json &doc) {
     auto metrics = doc["metrics"];
 
     if (metrics.is_null()) {

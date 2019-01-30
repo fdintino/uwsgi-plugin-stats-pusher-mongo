@@ -10,7 +10,7 @@ using json = nlohmann::json;
 
 extern struct uwsgi_server uwsgi;
 
-void transform_metrics(json doc);
+void transform_metrics(json &doc);
 
 #define LG0(err)      uwsgi_log("[stats-pusher-mongodb] " err "\n")
 #define LOG(err, ...) uwsgi_log("[stats-pusher-mongodb] " err "\n", __VA_ARGS__)
@@ -20,7 +20,7 @@ void transform_metrics(json doc);
 struct uwsgi_mongo_keyval {
     json::json_pointer key;
     std::string val_str;
-    std::int64_t val_int;
+    long long val_int;
     bool is_int;
 };
 
@@ -76,36 +76,47 @@ static void stats_pusher_mongodb_atexit() {
 }
 
 static void stats_pusher_mongodb_register_keyval(uwsgi_string_list *usl, bool is_int) {
-    struct uwsgi_mongo_keyval *kv;
-    kv = (uwsgi_mongo_keyval *)uwsgi_calloc(sizeof(struct uwsgi_mongo_keyval));
-    char *ptr_str = uwsgi_str(usl->value);
+    std::string str, key, val;
+    std::size_t pos;
+    auto kv = new uwsgi_mongo_keyval;
 
-    char *v = strchr(ptr_str, '=');
-    if (!v) {
+    kv->is_int = is_int;
+
+    str = std::string(usl->value);
+
+    pos = str.find('=');
+    if (pos == std::string::npos) {
         LG0("invalid keyval; missing '='");
         return;
     }
-    v[0] = 0;
-    v++;
+
+    key = str.substr(0, pos);
+    val = str.substr(pos + 1, std::string::npos);
+
     try {
-        kv->key = json::json_pointer(std::string(ptr_str));
+        kv->key = json::json_pointer(key);
     } catch (json::exception &exc) {
         LOG("invalid keyval json pointer in '%s': %s",
             kv->val_str.c_str(), exc.what());
         return;
     }
-    if (is_int) {
-        kv->is_int = true;
-        kv->val_int = strtoull(v, NULL, 0);
-        if (kv->val_int == 0 && strncmp(v, "0", 2) != 0) {
-            LOG("possible int conversion error of keyval in '%s': %s",
-                ptr_str, v);
-        }
+    if (!kv->is_int) {
+        kv->val_str = val;
     } else {
-        kv->val_str = v;
+        try {
+            kv->val_int = std::stoll(val, nullptr);
+        } catch (std::invalid_argument &ia) {
+            LOG("int conversion error of keyval in '%s'=%s: %s",
+                key.c_str(), val.c_str(), ia.what());
+            return;
+        } catch (std::out_of_range &orr) {
+            LOG("out-of-range error for keyval '%s'=%s to long long: %s",
+                key.c_str(), val.c_str(), orr.what());
+            return;
+        }
     }
     usl->custom_ptr = (void *)kv;
-    DBG("added custom keyval: %s=%s", ptr_str, v);
+    DBG("added custom keyval: %s=%s", key.c_str(), val.c_str());
 }
 
 static void stats_pusher_mongodb_set_doc_val(json &doc, uwsgi_string_list *usl) {
@@ -211,8 +222,8 @@ static void stats_pusher_mongodb_push(struct uwsgi_stats_pusher_instance *uspi,
     client = mongoc_client_pool_pop(u_mongo.pool);
     coll = mongoc_client_get_collection(client, u_mongo.db, u_mongo.coll);
 
-    const char *str = doc.dump().c_str();
-    if (!(bson = bson_new_from_json((const uint8_t *)str, -1, &error))) {
+    std::string str = doc.dump();
+    if (!(bson = bson_new_from_json((const uint8_t *)str.c_str(), -1, &error))) {
         LOG("BSON ERROR(%s/%s): %s", u_mongo.address, u_mongo.db_coll,
             error.message);
         goto done;

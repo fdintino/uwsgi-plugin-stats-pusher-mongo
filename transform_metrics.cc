@@ -23,11 +23,6 @@ using json = nlohmann::json;
  * pluralized (worker, core, and socket become workers, cores, and sockets,
  * respectively).
  *
- * Unfortunately, the keys for cheaper_busyness metrics have their workers
- * 1-indexed, rather than 0-indexed as they are everywhere else. Currently
- * this is being addressed in this function, but this would ideally be fixed
- * in the plugin source code itself.
- *
  * [1] In mongo-c-driver >= 1.6.0, documents with keys containing '.' are not
  *     permitted, since the resulting document is almost impossible to query:
  *     '.' is used in queries to indicate object nesting, and there is no way
@@ -51,17 +46,6 @@ static std::string metrics_key_to_json_pointer_path(std::string key) {
 
         if (is_array_key) {
             path += "s";
-            // cheaper_busyness index fix
-            if (std::string::npos != (next = key.find(".", pos + 1))) {
-                if (key.substr(next + 1) == "plugin.cheaper_busyness.busyness") {
-                    int worker_num = stoi(key.substr(pos + 1, next), nullptr, 10);
-                    path += "/";
-                    path += std::to_string(worker_num - 1);
-                    path += "/";
-                    last = next + 1;
-                    continue;
-                }
-            }
         }
         path += "/";
         last = pos + 1;
